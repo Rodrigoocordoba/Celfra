@@ -1,16 +1,43 @@
-const API_BASE = 'http://localhost:8000/api';
+// ---------------------------------------------------------------------------
+// API Base URL — uses VITE_API_URL env var in production, localhost in dev
+// ---------------------------------------------------------------------------
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
 
+console.log('[CelFra API] Base URL:', API_BASE);
+
+// ---------------------------------------------------------------------------
+// Fetch wrapper with 60s timeout to handle Render free-tier cold starts
+// ---------------------------------------------------------------------------
+async function fetchWithTimeout(url, timeoutMs = 60000) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    clearTimeout(timeoutId);
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+    return res.json();
+  } catch (err) {
+    clearTimeout(timeoutId);
+    if (err.name === 'AbortError') {
+      throw new Error(
+        'El servidor tardó demasiado en responder. Puede estar iniciándose — intentá de nuevo en unos segundos.'
+      );
+    }
+    throw err;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Public API functions
+// ---------------------------------------------------------------------------
 export async function fetchCategories() {
-  const res = await fetch(`${API_BASE}/categories`);
-  if (!res.ok) throw new Error('Error al cargar categorías');
-  return res.json();
+  return fetchWithTimeout(`${API_BASE}/categories`);
 }
 
 export async function fetchProducts(category = null) {
   const url = category
     ? `${API_BASE}/products?category=${encodeURIComponent(category)}`
     : `${API_BASE}/products`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error('Error al cargar productos');
-  return res.json();
+  return fetchWithTimeout(url);
 }
