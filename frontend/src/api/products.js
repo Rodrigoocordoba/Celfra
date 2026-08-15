@@ -1,7 +1,8 @@
 // ---------------------------------------------------------------------------
-// API Base URL — uses VITE_API_URL env var in production, localhost in dev
+// API Base URL — uses VITE_API_URL env var if set, otherwise defaults to Render
+// For local dev, create a .env file with: VITE_API_URL=http://localhost:8000/api
 // ---------------------------------------------------------------------------
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
+const API_BASE = import.meta.env.VITE_API_URL || 'https://celfra.onrender.com/api';
 
 console.log('[CelFra API] Base URL:', API_BASE);
 
