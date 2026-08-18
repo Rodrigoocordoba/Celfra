@@ -36,9 +36,11 @@ export async function fetchCategories() {
   return fetchWithTimeout(`${API_BASE}/categories`);
 }
 
-export async function fetchProducts(category = null) {
-  const url = category
-    ? `${API_BASE}/products?category=${encodeURIComponent(category)}`
-    : `${API_BASE}/products`;
+export async function fetchProducts(category = null, subcategory = null) {
+  const params = new URLSearchParams();
+  if (category) params.set('category', category);
+  if (subcategory) params.set('subcategory', subcategory);
+  const query = params.toString();
+  const url = query ? `${API_BASE}/products?${query}` : `${API_BASE}/products`;
   return fetchWithTimeout(url);
 }
