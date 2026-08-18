@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
 import Navbar from './components/Navbar'
 import Hero from './components/Hero'
 import Categories from './components/Categories'
@@ -7,7 +8,14 @@ import WhatsAppFloat from './components/WhatsAppFloat'
 import Footer from './components/Footer'
 import { fetchCategories, fetchProducts } from './api/products'
 
-export default function App() {
+// Admin Pages
+import AdminLogin from './pages/Admin/AdminLogin'
+import AdminLayout from './pages/Admin/AdminLayout'
+import AdminDashboard from './pages/Admin/AdminDashboard'
+import AdminProducts from './pages/Admin/AdminProducts'
+import AdminCategories from './pages/Admin/AdminCategories'
+
+function PublicCatalog() {
   const [categories, setCategories] = useState([])
   const [products, setProducts] = useState([])
   const [activeCategory, setActiveCategory] = useState(null)
@@ -15,67 +23,33 @@ export default function App() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
-  // Load categories on mount
   useEffect(() => {
-    fetchCategories()
-      .then(setCategories)
-      .catch((err) => console.error('Error loading categories:', err))
+    fetchCategories().then(setCategories).catch(err => console.error('Error loading categories:', err))
   }, [])
 
-  // Load products when category or subcategory changes
   useEffect(() => {
     setLoading(true)
     setError(null)
     fetchProducts(activeCategory, activeSubcategory)
-      .then((data) => {
-        setProducts(data)
-        setLoading(false)
-      })
+      .then((data) => { setProducts(data); setLoading(false) })
       .catch((err) => {
         console.error('Error loading products:', err)
-        setError('No se pudieron cargar los productos. Asegurate de que el servidor esté corriendo.')
+        setError('No se pudieron cargar los productos.')
         setLoading(false)
       })
   }, [activeCategory, activeSubcategory])
-
-  const handleRetry = () => {
-    // Force re-fetch by toggling a dummy value
-    setLoading(true)
-    setError(null)
-    fetchProducts(activeCategory, activeSubcategory)
-      .then((data) => { setProducts(data); setLoading(false); })
-      .catch((err) => {
-        setError('No se pudieron cargar los productos. Asegurate de que el servidor esté corriendo.')
-        setLoading(false)
-      })
-  }
 
   return (
     <div className="min-h-screen bg-cream-light">
       <Navbar />
       <Hero />
-
-      {/* Catalog Section */}
       <section id="catalogo" className="py-20 sm:py-24">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          {/* Section Header */}
           <div className="text-center mb-12">
-            <div className="flex items-center justify-center gap-4 mb-4">
-              <div className="w-8 h-[1px] bg-gold/30" />
-              <span className="text-gold text-xs uppercase tracking-[0.3em] font-medium">
-                Nuestros Productos
-              </span>
-              <div className="w-8 h-[1px] bg-gold/30" />
-            </div>
-            <h2 className="font-serif text-3xl sm:text-4xl md:text-5xl font-bold text-charcoal mb-4">
-              Catálogo
-            </h2>
-            <p className="text-muted max-w-xl mx-auto">
-              Explorá nuestra selección de fragancias importadas y productos de belleza premium.
-            </p>
+            <h2 className="font-serif text-3xl sm:text-4xl md:text-5xl font-bold text-charcoal mb-4">Catálogo</h2>
+            <p className="text-muted max-w-xl mx-auto">Explorá nuestra selección de fragancias importadas y productos de belleza premium.</p>
           </div>
 
-          {/* Category Filters */}
           <div className="mb-10">
             <Categories
               categories={categories}
@@ -86,28 +60,33 @@ export default function App() {
             />
           </div>
 
-          {/* Error State */}
-          {error && (
-            <div className="text-center py-12 bg-soft-rose/20 rounded-2xl border border-soft-rose/30 mb-8">
-              <span className="text-3xl mb-3 block">⚠️</span>
-              <p className="text-charcoal-light font-medium mb-1">Error de conexión</p>
-              <p className="text-sm text-muted">{error}</p>
-              <button
-                onClick={handleRetry}
-                className="mt-4 text-sm text-gold hover:text-gold-dark underline underline-offset-4 transition-colors"
-              >
-                Reintentar
-              </button>
-            </div>
-          )}
-
-          {/* Products Grid */}
+          {error && <div className="text-center py-12 text-soft-rose">{error}</div>}
           <ProductGrid products={products} loading={loading} />
         </div>
       </section>
-
       <Footer />
       <WhatsAppFloat />
     </div>
+  )
+}
+
+export default function App() {
+  return (
+    <Router>
+      <Routes>
+        {/* Public Route */}
+        <Route path="/" element={<PublicCatalog />} />
+
+        {/* Admin Routes */}
+        <Route path="/admin" element={<AdminLogin />} />
+        
+        {/* Protected Admin Layout */}
+        <Route element={<AdminLayout />}>
+          <Route path="/admin/dashboard" element={<AdminDashboard />} />
+          <Route path="/admin/products" element={<AdminProducts />} />
+          <Route path="/admin/categories" element={<AdminCategories />} />
+        </Route>
+      </Routes>
+    </Router>
   )
 }

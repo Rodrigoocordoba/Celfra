@@ -1,21 +1,42 @@
 """
 CelFra Perfumes — Backend API
-FastAPI server providing categories and products for the perfumery catalog.
+FastAPI server providing public catalog endpoints and protected admin CRUD.
 """
 
-from fastapi import FastAPI, Query
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, Depends, Query, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import Optional
+from sqlmodel import Session, select
 
-app = FastAPI(
-    title="CelFra Perfumes API",
-    description="API del catálogo de perfumería CelFra",
-    version="2.0.0",
+from database import create_db_and_tables, get_session, engine
+from models import CategoryDB, SubcategoryDB, ProductDB
+from seed_data import seed_database
+from auth import (
+    LoginRequest, TokenResponse, verify_password, create_access_token, get_current_admin
 )
 
 # ---------------------------------------------------------------------------
-# CORS — allow all origins (prototype stage)
+# App Lifespan (Startup)
+# ---------------------------------------------------------------------------
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Setup database tables and seed initial data
+    create_db_and_tables()
+    with Session(engine) as session:
+        seed_database(session)
+    yield
+
+
+app = FastAPI(
+    title="CelFra Perfumes API",
+    description="API del catálogo de perfumería CelFra con Backoffice",
+    version="3.0.0",
+    lifespan=lifespan
+)
+
+# ---------------------------------------------------------------------------
+# CORS
 # ---------------------------------------------------------------------------
 app.add_middleware(
     CORSMiddleware,
@@ -25,560 +46,140 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 # ---------------------------------------------------------------------------
-# Models
+# API Responses Schemas (Public)
 # ---------------------------------------------------------------------------
 
-class Subcategory(BaseModel):
-    id: str
-    name: str
+class SubcategoryOut(SubcategoryDB):
+    pass
 
-
-class Category(BaseModel):
-    id: str
-    name: str
-    description: str
-    icon: str
-    subcategories: list[Subcategory] = []
-
-
-class Product(BaseModel):
-    id: int
-    name: str
-    brand: str
-    category_id: str       # top-level: "perfumes", "belleza", "combos"
-    subcategory_id: str     # e.g. "arabes", "body_splash"
-    size: str = ""          # e.g. "100 ml"
-    description: str
-    notes: str
-    image: str
-    gender: str             # "Masculino", "Femenino", "Unisex"
+class CategoryOut(CategoryDB):
+    subcategories: list[SubcategoryOut] = []
 
 
 # ---------------------------------------------------------------------------
-# Categories with subcategories
-# ---------------------------------------------------------------------------
-
-CATEGORIES: list[Category] = [
-    Category(
-        id="perfumes",
-        name="Perfumes",
-        description="Fragancias importadas de las mejores marcas",
-        icon="✨",
-        subcategories=[
-            Subcategory(id="disenador", name="Diseñador"),
-            Subcategory(id="arabes", name="Árabes"),
-            Subcategory(id="imitaciones", name="Imitaciones"),
-        ],
-    ),
-    Category(
-        id="belleza",
-        name="Productos de Belleza",
-        description="Cuidado personal y cosméticos premium",
-        icon="💎",
-        subcategories=[
-            Subcategory(id="body_splash", name="Body Splash"),
-            Subcategory(id="makeup", name="Makeup"),
-            Subcategory(id="skincare", name="Skincare"),
-        ],
-    ),
-    Category(
-        id="combos",
-        name="Combos",
-        description="Packs y combinaciones especiales",
-        icon="🎁",
-        subcategories=[],
-    ),
-]
-
-# ---------------------------------------------------------------------------
-# Products — Perfumes Árabes
-# ---------------------------------------------------------------------------
-
-# Image pool to cycle through for visual variety
-_MASC_IMAGES = [
-    "afnan_9pm", "rasasi_hawas", "armaf_cdni", "nautica_voyage",
-    "ab_blue_seduction", "versace_eros",
-]
-_FEM_IMAGES = ["lancome_lveb", "ch_good_girl"]
-
-def _m(i: int) -> str:
-    return _MASC_IMAGES[i % len(_MASC_IMAGES)]
-
-def _f(i: int) -> str:
-    return _FEM_IMAGES[i % len(_FEM_IMAGES)]
-
-
-PRODUCTS: list[Product] = [
-
-    # ── MAISON ALHAMBRA ───────────────────────────────────────────────────
-    Product(
-        id=1,
-        name="Yeah! Man",
-        brand="Maison Alhambra",
-        category_id="perfumes",
-        subcategory_id="arabes",
-        size="125 ml",
-        description="Fragancia masculina intensa con carácter. Un aroma que deja huella en cada paso.",
-        notes="Notas amaderadas, especiadas, aromáticas",
-        image=_m(0),
-        gender="Masculino",
-    ),
-    Product(
-        id=2,
-        name="Salvo Intense",
-        brand="Maison Alhambra",
-        category_id="perfumes",
-        subcategory_id="arabes",
-        size="100 ml",
-        description="Intensidad y elegancia en una fragancia que combina notas orientales con un fondo amaderado.",
-        notes="Notas orientales, amaderadas, intensas",
-        image=_m(1),
-        gender="Masculino",
-    ),
-    Product(
-        id=3,
-        name="Salvo Elixir",
-        brand="Maison Alhambra",
-        category_id="perfumes",
-        subcategory_id="arabes",
-        size="30 ml",
-        description="La versión concentrada de Salvo. Potencia y duración excepcionales en formato compacto.",
-        notes="Notas orientales, amaderadas, concentradas",
-        image=_m(2),
-        gender="Masculino",
-    ),
-    Product(
-        id=4,
-        name="Jean Lowe Immortal",
-        brand="Maison Alhambra",
-        category_id="perfumes",
-        subcategory_id="arabes",
-        size="30 ml",
-        description="Una fragancia inmortal que fusiona frescura y profundidad. Ideal para el uso diario.",
-        notes="Notas frescas, aromáticas, amaderadas",
-        image=_m(3),
-        gender="Masculino",
-    ),
-
-    # ── ARMAF ─────────────────────────────────────────────────────────────
-    Product(
-        id=5,
-        name="Odyssey Go Mango",
-        brand="Armaf",
-        category_id="perfumes",
-        subcategory_id="arabes",
-        size="100 ml",
-        description="Una explosión tropical y frutal. Frescura exótica con un toque dulce irresistible.",
-        notes="Mango, notas frutales, almizcle",
-        image=_m(4),
-        gender="Unisex",
-    ),
-    Product(
-        id=6,
-        name="Odyssey Artisto",
-        brand="Armaf",
-        category_id="perfumes",
-        subcategory_id="arabes",
-        description="Sofisticación artística capturada en fragancia. Para quienes aprecian lo exclusivo.",
-        notes="Notas amaderadas, aromáticas, elegantes",
-        image=_m(5),
-        gender="Masculino",
-    ),
-    Product(
-        id=7,
-        name="Odyssey Mega",
-        brand="Armaf",
-        category_id="perfumes",
-        subcategory_id="arabes",
-        description="Mega proyección, mega duración. Una fragancia que no pasa desapercibida.",
-        notes="Notas intensas, amaderadas, especiadas",
-        image=_m(0),
-        gender="Masculino",
-    ),
-    Product(
-        id=8,
-        name="Odyssey Aqua",
-        brand="Armaf",
-        category_id="perfumes",
-        subcategory_id="arabes",
-        description="Frescura acuática premium. Como una brisa marina en un frasco de lujo.",
-        notes="Notas acuáticas, cítricas, almizcle",
-        image=_m(1),
-        gender="Masculino",
-    ),
-    Product(
-        id=9,
-        name="Odyssey Mandarín Sky",
-        brand="Armaf",
-        category_id="perfumes",
-        subcategory_id="arabes",
-        description="Cítricos vibrantes que evocan un cielo despejado. Energía y frescura pura.",
-        notes="Mandarina, notas cítricas, amaderadas",
-        image=_m(2),
-        gender="Masculino",
-    ),
-    Product(
-        id=10,
-        name="Odyssey Mandarín Sky Elixir",
-        brand="Armaf",
-        category_id="perfumes",
-        subcategory_id="arabes",
-        description="La versión elixir del Mandarín Sky. Mayor concentración y una estela imponente.",
-        notes="Mandarina, notas orientales, concentradas",
-        image=_m(3),
-        gender="Masculino",
-    ),
-    Product(
-        id=11,
-        name="Odyssey Mandarín Sky Vintage",
-        brand="Armaf",
-        category_id="perfumes",
-        subcategory_id="arabes",
-        description="Un clásico reimaginado. Elegancia vintage con un toque de mandarina sofisticada.",
-        notes="Mandarina, notas vintage, amaderadas",
-        image=_m(4),
-        gender="Masculino",
-    ),
-    Product(
-        id=12,
-        name="Odyssey Candee",
-        brand="Armaf",
-        category_id="perfumes",
-        subcategory_id="arabes",
-        description="Dulzura irresistible con personalidad. Una fragancia golosa y envolvente.",
-        notes="Notas dulces, gourmand, vainilla",
-        image=_f(0),
-        gender="Femenino",
-    ),
-    Product(
-        id=13,
-        name="Odyssey Spectra",
-        brand="Armaf",
-        category_id="perfumes",
-        subcategory_id="arabes",
-        description="Un espectro de notas que sorprende. Versatilidad y carácter en cada aplicación.",
-        notes="Notas aromáticas, especiadas, amaderadas",
-        image=_m(5),
-        gender="Masculino",
-    ),
-    Product(
-        id=14,
-        name="Club de Nuit Women",
-        brand="Armaf",
-        category_id="perfumes",
-        subcategory_id="arabes",
-        description="Feminidad y poder en una fragancia nocturna. Para la mujer que brilla de noche.",
-        notes="Notas florales, frutales, almizcle",
-        image=_f(1),
-        gender="Femenino",
-    ),
-    Product(
-        id=15,
-        name="Club de Nuit Iconic",
-        brand="Armaf",
-        category_id="perfumes",
-        subcategory_id="arabes",
-        description="La definición de icónico. Presencia, elegancia y un sillage que enamora.",
-        notes="Notas amaderadas, aromáticas, elegantes",
-        image=_m(0),
-        gender="Masculino",
-    ),
-    Product(
-        id=16,
-        name="Club de Nuit Intense Man",
-        brand="Armaf",
-        category_id="perfumes",
-        subcategory_id="arabes",
-        description="Un clásico moderno con proyección excepcional. Elegancia y presencia en cada aplicación.",
-        notes="Limón, grosellas negras, abedul, almizcle",
-        image=_m(2),
-        gender="Masculino",
-    ),
-    Product(
-        id=17,
-        name="Club de Nuit Urban Man Elixir",
-        brand="Armaf",
-        category_id="perfumes",
-        subcategory_id="arabes",
-        description="El hombre urbano elevado al máximo. Sofisticación moderna con concentración elixir.",
-        notes="Notas urbanas, amaderadas, especiadas",
-        image=_m(3),
-        gender="Masculino",
-    ),
-    Product(
-        id=18,
-        name="Club de Nuit Sillage",
-        brand="Armaf",
-        category_id="perfumes",
-        subcategory_id="arabes",
-        description="El arte del sillage perfecto. Dejá tu marca en cada lugar al que vayas.",
-        notes="Notas amaderadas, aromáticas, almizcle blanco",
-        image=_m(4),
-        gender="Masculino",
-    ),
-
-    # ── AFNAN ─────────────────────────────────────────────────────────────
-    Product(
-        id=19,
-        name="9 PM Elixir",
-        brand="Afnan",
-        category_id="perfumes",
-        subcategory_id="arabes",
-        description="La versión más intensa del icónico 9 PM. Concentración máxima para noches inolvidables.",
-        notes="Canela, lavanda, vainilla, ámbar concentrado",
-        image=_m(0),
-        gender="Masculino",
-    ),
-    Product(
-        id=20,
-        name="9 AM",
-        brand="Afnan",
-        category_id="perfumes",
-        subcategory_id="arabes",
-        description="La contraparte matutina del 9 PM. Frescura energizante para empezar el día con todo.",
-        notes="Notas cítricas, frescas, aromáticas",
-        image=_m(1),
-        gender="Masculino",
-    ),
-    Product(
-        id=21,
-        name="9 PM Black",
-        brand="Afnan",
-        category_id="perfumes",
-        subcategory_id="arabes",
-        description="La versión más oscura y misteriosa de la línea 9 PM. Seducción pura.",
-        notes="Notas oscuras, orientales, amaderadas",
-        image=_m(2),
-        gender="Masculino",
-    ),
-    Product(
-        id=22,
-        name="9 PM Night Out",
-        brand="Afnan",
-        category_id="perfumes",
-        subcategory_id="arabes",
-        description="Diseñado para la noche perfecta. Carismático, magnético e inolvidable.",
-        notes="Notas nocturnas, especiadas, dulces",
-        image=_m(3),
-        gender="Masculino",
-    ),
-    Product(
-        id=23,
-        name="9 PM Velles",
-        brand="Afnan",
-        category_id="perfumes",
-        subcategory_id="arabes",
-        description="Una interpretación exclusiva dentro de la línea 9 PM. Refinamiento absoluto.",
-        notes="Notas orientales, amaderadas, refinadas",
-        image=_m(4),
-        gender="Masculino",
-    ),
-    Product(
-        id=24,
-        name="9 AM Poitiers Femme",
-        brand="Afnan",
-        category_id="perfumes",
-        subcategory_id="arabes",
-        description="Elegancia femenina francesa capturada en una fragancia matutina. Delicada y poderosa.",
-        notes="Notas florales, frescas, elegantes",
-        image=_f(0),
-        gender="Femenino",
-    ),
-
-    # ── LATTAFA ───────────────────────────────────────────────────────────
-    Product(
-        id=25,
-        name="Khamrah Dukhan",
-        brand="Lattafa",
-        category_id="perfumes",
-        subcategory_id="arabes",
-        description="Humo y misterio en una fragancia oriental profunda. Khamrah en su versión más ahumada.",
-        notes="Notas ahumadas, orientales, amaderadas",
-        image=_m(5),
-        gender="Unisex",
-    ),
-    Product(
-        id=26,
-        name="Khamrah Qawha",
-        brand="Lattafa",
-        category_id="perfumes",
-        subcategory_id="arabes",
-        description="Inspirado en el ritual del café árabe. Calidez gourmand con alma oriental.",
-        notes="Café, notas gourmand, especias cálidas",
-        image=_m(0),
-        gender="Unisex",
-    ),
-    Product(
-        id=27,
-        name="Khamrah Clásico",
-        brand="Lattafa",
-        category_id="perfumes",
-        subcategory_id="arabes",
-        description="El Khamrah original que conquistó al mundo. Dulzura oriental con profundidad inigualable.",
-        notes="Notas orientales, dulces, amaderadas",
-        image=_m(1),
-        gender="Unisex",
-    ),
-    Product(
-        id=28,
-        name="Whis Confesión",
-        brand="Lattafa",
-        category_id="perfumes",
-        subcategory_id="arabes",
-        description="Una confesión olfativa. Misterio y seducción en cada nota de esta fragancia única.",
-        notes="Notas orientales, especiadas, seductoras",
-        image=_m(2),
-        gender="Masculino",
-    ),
-    Product(
-        id=29,
-        name="Asad Negro",
-        brand="Lattafa",
-        category_id="perfumes",
-        subcategory_id="arabes",
-        description="El león negro. Potencia y nobleza en una fragancia de presencia imponente.",
-        notes="Notas amaderadas, especiadas, intensas",
-        image=_m(3),
-        gender="Masculino",
-    ),
-    Product(
-        id=30,
-        name="Asad Zanzíbar",
-        brand="Lattafa",
-        category_id="perfumes",
-        subcategory_id="arabes",
-        description="Inspirado en las especias de Zanzíbar. Exotismo y calidez en cada aplicación.",
-        notes="Especias exóticas, notas cálidas, ámbar",
-        image=_m(4),
-        gender="Masculino",
-    ),
-    Product(
-        id=31,
-        name="Asad Bourbon",
-        brand="Lattafa",
-        category_id="perfumes",
-        subcategory_id="arabes",
-        description="La fusión perfecta entre oriente y el carácter del bourbon. Robusto y cautivador.",
-        notes="Bourbon, notas amaderadas, tabaco",
-        image=_m(5),
-        gender="Masculino",
-    ),
-    Product(
-        id=32,
-        name="Yara Moi",
-        brand="Lattafa",
-        category_id="perfumes",
-        subcategory_id="arabes",
-        description="La esencia del 'yo' femenino. Delicada, dulce y absolutamente cautivadora.",
-        notes="Notas florales, dulces, gourmand",
-        image=_f(0),
-        gender="Femenino",
-    ),
-    Product(
-        id=33,
-        name="Yara Tous",
-        brand="Lattafa",
-        category_id="perfumes",
-        subcategory_id="arabes",
-        description="Yara para todos los momentos. Versatilidad y encanto femenino sin límites.",
-        notes="Notas florales, frutales, almizcle",
-        image=_f(1),
-        gender="Femenino",
-    ),
-    Product(
-        id=34,
-        name="Yara Elixir",
-        brand="Lattafa",
-        category_id="perfumes",
-        subcategory_id="arabes",
-        description="La concentración máxima de Yara. Profundidad y duración para la mujer exigente.",
-        notes="Notas florales, orientales, concentradas",
-        image=_f(0),
-        gender="Femenino",
-    ),
-    Product(
-        id=35,
-        name="Yara Candy",
-        brand="Lattafa",
-        category_id="perfumes",
-        subcategory_id="arabes",
-        description="Dulzura irresistible en su máxima expresión. Como un caramelo de lujo hecho fragancia.",
-        notes="Notas dulces, gourmand, vainilla, caramelo",
-        image=_f(1),
-        gender="Femenino",
-    ),
-    Product(
-        id=36,
-        name="Yara Women",
-        brand="Lattafa",
-        category_id="perfumes",
-        subcategory_id="arabes",
-        description="La fragancia insignia de la línea Yara. Feminidad oriental en estado puro.",
-        notes="Notas florales, orientales, almizcle",
-        image=_f(0),
-        gender="Femenino",
-    ),
-    Product(
-        id=37,
-        name="Fakhar Negro",
-        brand="Lattafa",
-        category_id="perfumes",
-        subcategory_id="arabes",
-        description="Orgullo en su forma más oscura y elegante. Una fragancia que inspira respeto.",
-        notes="Notas amaderadas, especiadas, oscuras",
-        image=_m(0),
-        gender="Masculino",
-    ),
-    Product(
-        id=38,
-        name="Fakhar Rosa",
-        brand="Lattafa",
-        category_id="perfumes",
-        subcategory_id="arabes",
-        description="La versión rosada de Fakhar. Fuerza femenina con un toque floral sofisticado.",
-        notes="Rosa, notas florales, almizcle",
-        image=_f(1),
-        gender="Femenino",
-    ),
-    Product(
-        id=39,
-        name="Fakhar Gold",
-        brand="Lattafa",
-        category_id="perfumes",
-        subcategory_id="arabes",
-        description="La corona de la línea Fakhar. Opulencia dorada en una fragancia de alto impacto.",
-        notes="Notas orientales, amaderadas, oud dorado",
-        image=_m(5),
-        gender="Unisex",
-    ),
-]
-
-
-# ---------------------------------------------------------------------------
-# Endpoints
+# Public Endpoints
 # ---------------------------------------------------------------------------
 
 @app.get("/")
 async def root():
-    return {"message": "CelFra Perfumes API", "version": "2.0.0"}
+    return {"message": "CelFra Perfumes API", "version": "3.0.0"}
 
 
-@app.get("/api/categories", response_model=list[Category])
-async def get_categories():
+@app.get("/api/categories", response_model=list[CategoryOut])
+async def get_categories(session: Session = Depends(get_session)):
     """Retorna todas las categorías con sus subcategorías."""
-    return CATEGORIES
+    categories = session.exec(select(CategoryDB)).all()
+    return categories
 
 
-@app.get("/api/products", response_model=list[Product])
+@app.get("/api/products", response_model=list[ProductDB])
 async def get_products(
-    category: Optional[str] = Query(None, description="Filtrar por categoría principal"),
-    subcategory: Optional[str] = Query(None, description="Filtrar por subcategoría"),
+    category: str | None = Query(None, description="Filtrar por categoría principal"),
+    subcategory: str | None = Query(None, description="Filtrar por subcategoría"),
+    session: Session = Depends(get_session)
 ):
     """Retorna la lista de productos. Filtra por categoría y/o subcategoría."""
-    result = PRODUCTS
+    query = select(ProductDB)
     if category:
-        result = [p for p in result if p.category_id == category]
+        query = query.where(ProductDB.category_id == category)
     if subcategory:
-        result = [p for p in result if p.subcategory_id == subcategory]
-    return result
+        query = query.where(ProductDB.subcategory_id == subcategory)
+    
+    return session.exec(query).all()
+
+
+# ---------------------------------------------------------------------------
+# Admin Endpoints (Protected)
+# ---------------------------------------------------------------------------
+
+@app.post("/api/admin/login", response_model=TokenResponse)
+async def admin_login(req: LoginRequest):
+    """Verifica la contraseña y retorna un JWT."""
+    if not verify_password(req.password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Contraseña incorrecta",
+        )
+    access_token = create_access_token()
+    return {"access_token": access_token, "token_type": "bearer"}
+
+
+# ── Products CRUD ────────────────────────────────────────────────────────
+
+@app.post("/api/admin/products", response_model=ProductDB)
+async def create_product(
+    product: ProductDB, 
+    session: Session = Depends(get_session),
+    admin: dict = Depends(get_current_admin)
+):
+    session.add(product)
+    session.commit()
+    session.refresh(product)
+    return product
+
+
+@app.put("/api/admin/products/{product_id}", response_model=ProductDB)
+async def update_product(
+    product_id: int, 
+    product_update: ProductDB, 
+    session: Session = Depends(get_session),
+    admin: dict = Depends(get_current_admin)
+):
+    db_product = session.get(ProductDB, product_id)
+    if not db_product:
+        raise HTTPException(status_code=404, detail="Producto no encontrado")
+    
+    product_data = product_update.model_dump(exclude_unset=True)
+    for key, value in product_data.items():
+        # Prevent changing ID
+        if key != "id":
+            setattr(db_product, key, value)
+            
+    session.add(db_product)
+    session.commit()
+    session.refresh(db_product)
+    return db_product
+
+
+@app.delete("/api/admin/products/{product_id}")
+async def delete_product(
+    product_id: int, 
+    session: Session = Depends(get_session),
+    admin: dict = Depends(get_current_admin)
+):
+    db_product = session.get(ProductDB, product_id)
+    if not db_product:
+        raise HTTPException(status_code=404, detail="Producto no encontrado")
+    
+    session.delete(db_product)
+    session.commit()
+    return {"ok": True, "message": "Producto eliminado"}
+
+# ── Categories CRUD ──────────────────────────────────────────────────────
+
+@app.post("/api/admin/categories", response_model=CategoryDB)
+async def create_category(
+    category: CategoryDB, 
+    session: Session = Depends(get_session),
+    admin: dict = Depends(get_current_admin)
+):
+    session.add(category)
+    session.commit()
+    session.refresh(category)
+    return category
+
+@app.delete("/api/admin/categories/{category_id}")
+async def delete_category(
+    category_id: str, 
+    session: Session = Depends(get_session),
+    admin: dict = Depends(get_current_admin)
+):
+    db_category = session.get(CategoryDB, category_id)
+    if not db_category:
+        raise HTTPException(status_code=404, detail="Categoría no encontrada")
+    
+    session.delete(db_category)
+    session.commit()
+    return {"ok": True, "message": "Categoría eliminada"}
